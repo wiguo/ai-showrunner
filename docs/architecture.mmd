@@ -5,17 +5,17 @@ flowchart TB
 
     subgraph ALI["Alibaba Cloud — Simple Application Server (Docker)"]
         API["FastAPI  server/app.py\nPOST /jobs · GET /jobs/{id} · confirm · download"]
-        QUEUE["Job queue (concurrency 1)\nper-job dir isolation  jobs/<id>/"]
+        QUEUE["Job queue (concurrency 1)\nper-job dir isolation  jobs/{id}/"]
         WORKER["Worker  server/worker.py"]
         subgraph PIPE["Showrunner pipeline (resumable stages)"]
             S1["1 Screenplay\nqwen3.7-max"]
             S2["2 Branching scene graph\nqwen3.7-max JSON + validation"]
             S3["3 Intro narration\nqwen3.7-max"]
             GATE{{"BUDGET GATE\nuser approves estimated cost"}}
-            S4["4 Keyframes\nwan2.6-t2i (seeded, style-locked)"]
+            S4["4 Keyframes\nwan2.2-t2i-flash (seeded, style-locked)"]
             S5["5 Video clips\nhappyhorse-1.1-i2v\n(quota fallback chain)"]
-            S6["6 Inner monologue TTS + SRT\ncosyvoice-v3-plus"]
-            S7["7 Narrator voice\ncosyvoice-v3-plus"]
+            S6["6 Inner monologue TTS + SRT\nqwen3-tts-flash (voice auto-matched)"]
+            S7["7 Narrator voice\nqwen3-tts-flash"]
             S8["8 Ren'Py assembly\nffmpeg mux voice + burn subtitles\nwebm convert · headless lint"]
         end
         ZIP["game.zip\ncomplete Ren'Py project"]
