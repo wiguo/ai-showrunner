@@ -4,14 +4,14 @@
 
 ## Project name
 
-**AI Showrunner: Story→Game Studio**
-(alternates: *Premise to Play*, *One-Line Studio*, *Greenlight*)
+**Once Upon a Line**
+*Every story starts with a single line.*
 
 ## Elevator pitch (≤ ~200 chars)
 
-Type one sentence. An autonomous Qwen-powered agent writes, storyboards, films,
-voices and subtitles a branching short film — and hands you a playable
-interactive game. A full studio in a textbox.
+Once Upon a Line: type one sentence and an autonomous Qwen-powered agent
+writes, storyboards, films, voices and subtitles a branching interactive film —
+then hands you the playable game. A full studio in a textbox.
 
 ## Project story (draft)
 

@@ -1,4 +1,4 @@
-# AI Showrunner — type a story, download a playable film
+# Once Upon a Line — type a story, download a playable film
 
 **One premise in → one complete interactive video game out.** An autonomous
 agent writes the screenplay, storyboards it into a branching scene graph,

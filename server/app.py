@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from pipeline import config
 from . import jobs, worker
 
-app = FastAPI(title="AI Showrunner", version="1.0")
+app = FastAPI(title="Once Upon a Line", version="1.0")
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
