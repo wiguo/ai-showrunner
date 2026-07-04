@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Showrunner — story to playable film</title>
+<style>
+  :root { --gold:#f0c674; --bg:#0d0f14; --card:#161a22; --line:#262c38; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:#e8e8e8;
+         font-family:Georgia,'Times New Roman',serif; }
+  .wrap { max-width:960px; margin:0 auto; padding:32px 20px 80px; }
+  h1 { font-size:44px; margin:24px 0 6px; color:var(--gold); font-weight:normal;
+       letter-spacing:1px; }
+  .tag { color:#9aa3b2; margin-bottom:28px; font-style:italic; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
+          padding:22px; margin-bottom:20px; }
+  textarea { width:100%; min-height:110px; background:#0b0d12; color:#eee;
+             border:1px solid var(--line); border-radius:8px; padding:12px;
+             font:16px Georgia,serif; resize:vertical; }
+  .row { display:flex; gap:16px; align-items:center; margin-top:14px; flex-wrap:wrap; }
+  button { background:var(--gold); color:#14161c; border:0; border-radius:8px;
+           padding:12px 26px; font:bold 16px Georgia,serif; cursor:pointer; }
+  button:disabled { opacity:.45; cursor:default; }
+  button.ghost { background:transparent; color:var(--gold);
+                 border:1px solid var(--gold); }
+  select { background:#0b0d12; color:#eee; border:1px solid var(--line);
+           border-radius:8px; padding:10px; font:15px Georgia,serif; }
+  .stage { display:flex; align-items:center; gap:12px; font-size:18px; }
+  .dot { width:12px; height:12px; border-radius:50%; background:var(--gold);
+         animation:pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity:.25; } }
+  .muted { color:#9aa3b2; font-size:14px; }
+  .scenes { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr));
+            gap:14px; margin-top:16px; }
+  .scene { background:#0b0d12; border:1px solid var(--line); border-radius:10px;
+           overflow:hidden; font-size:13px; }
+  .scene img { width:100%; aspect-ratio:16/9; object-fit:cover; display:block;
+               background:#000; }
+  .scene .ph { width:100%; aspect-ratio:16/9; background:
+               repeating-linear-gradient(45deg,#10131a,#10131a 12px,#0b0d12 12px,#0b0d12 24px); }
+  .scene .body { padding:10px; }
+  .badges { margin-top:8px; display:flex; gap:6px; flex-wrap:wrap; }
+  .b { padding:2px 8px; border-radius:20px; border:1px solid var(--line);
+       color:#667; font-size:11px; }
+  .b.on { color:#8fd18f; border-color:#2f4f2f; }
+  .b.choice { color:var(--gold); border-color:#5a4d20; }
+  .err { background:#2a1414; border:1px solid #5c2626; color:#f0b0b0;
+         padding:14px; border-radius:8px; white-space:pre-wrap; }
+  pre { white-space:pre-wrap; font:13px/1.5 Consolas,monospace; color:#b8c0cc;
+        max-height:260px; overflow:auto; background:#0b0d12; padding:12px;
+        border-radius:8px; }
+  .cost { font-size:22px; color:var(--gold); }
+  .chars li { margin-bottom:4px; }
+  a.dl { display:inline-block; background:var(--gold); color:#14161c;
+         text-decoration:none; border-radius:8px; padding:14px 30px;
+         font-weight:bold; font-size:18px; }
+  .steps { color:#9aa3b2; font-size:14px; line-height:1.8; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>AI Showrunner</h1>
+  <div class="tag">Type a story premise. An autonomous agent writes, storyboards,
+    films, voices and subtitles it — then hands you a playable interactive film.</div>
+
+  <div class="card" id="composer">
+    <textarea id="story" placeholder="e.g. A lighthouse keeper discovers the fog is alive — and it wants to trade memories for safe passage."></textarea>
+    <div class="row">
+      <label class="muted">Length:
+        <select id="len">
+          <option value="60">~1 minute (fast, cheap)</option>
+          <option value="90" selected>~1.5 minutes</option>
+          <option value="150">~2.5 minutes (full)</option>
+        </select>
+      </label>
+      <button id="go">Write my film</button>
+      <span class="muted">Phase 1 only writes the screenplay — you approve the
+        budget before any video is generated.</span>
+    </div>
+  </div>
+
+  <div id="status"></div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let jobId = localStorage.getItem("job") || null;
+let timer = null;
+
+$("#go").onclick = async () => {
+  const story = $("#story").value.trim();
+  if (story.length < 8) { alert("Give the story a little more to work with."); return; }
+  $("#go").disabled = true;
+  const r = await fetch("/jobs", {method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({story, target_seconds: +$("#len").value})});
+  if (!r.ok) { alert("Failed to start: " + await r.text()); $("#go").disabled=false; return; }
+  jobId = (await r.json()).id;
+  localStorage.setItem("job", jobId);
+  poll();
+};
+
+async function confirmJob() {
+  await fetch(`/jobs/${jobId}/confirm`, {method:"POST"});
+  poll();
+}
+
+function badge(on, label) { return `<span class="b ${on?"on":""}">${on?"✓ ":""}${label}</span>`; }
+
+const STAGE_TEXT = {
+  queued: "Queued…",
+  writing: "Act I — the agent is writing the screenplay and scene graph…",
+  awaiting_confirmation: "Screenplay ready — review and approve the shoot.",
+  queued_media: "Approved — waiting for the studio floor…",
+  generating: "Act II — filming: keyframes → video clips → voice → subtitles…",
+  packaging: "Act III — assembling the Ren'Py game…",
+  done: "That's a wrap!",
+  error: "Something broke on set.",
+};
+
+function render(s) {
+  let h = "";
+  const busy = ["queued","writing","queued_media","generating","packaging"].includes(s.stage);
+  h += `<div class="card"><div class="stage">${busy?'<div class="dot"></div>':""}
+        <b>${STAGE_TEXT[s.stage] || s.stage}</b></div>`;
+  if (s.title) h += `<div style="font-size:26px;color:var(--gold);margin-top:10px">“${s.title}”</div>`;
+  if (s.error) h += `<div class="err" style="margin-top:12px">${s.error}</div>
+    <div class="row"><button class="ghost" onclick="confirmJob()">Resume job</button></div>`;
+  h += `</div>`;
+
+  if (s.stage === "awaiting_confirmation") {
+    h += `<div class="card"><h3 style="margin-top:0">The pitch</h3>`;
+    if (s.characters?.length) {
+      h += `<ul class="chars">` + s.characters.map(c =>
+        `<li><b>${c.name}</b> <span class="muted">(${c.gender||"?"})</span> — ${c.appearance}</li>`).join("") + `</ul>`;
+    }
+    if (s.intro?.length) h += `<p style="font-style:italic">${s.intro.join("<br>")}</p>`;
+    if (s.script_excerpt) h += `<pre>${s.script_excerpt.replace(/</g,"&lt;")}…</pre>`;
+    h += `<div class="row"><span class="cost">Estimated media budget: ~$${s.estimated_cost ?? "?"}</span>
+          <button onclick="confirmJob()">Approve &amp; film it</button></div></div>`;
+  }
+
+  if (s.scenes?.length) {
+    h += `<div class="card"><h3 style="margin-top:0">Scenes (${s.scenes.length})</h3><div class="scenes">`;
+    for (const sc of s.scenes) {
+      const img = sc.frame
+        ? `<img src="/jobs/${jobId}/asset/${sc.id}_first.png" loading="lazy">`
+        : `<div class="ph"></div>`;
+      h += `<div class="scene">${img}<div class="body">
+        <b>${sc.id}</b> · ${sc.duration || "?"}s ${sc.is_choice?'<span class="b choice">CHOICE</span>':""}
+        <div class="muted" style="margin-top:4px">${sc.summary}</div>
+        <div class="badges">${badge(sc.frame,"frame")}${badge(sc.clip,"clip")}
+          ${badge(sc.voiced,"voice")}${badge(sc.movie,"movie")}</div>
+      </div></div>`;
+    }
+    h += `</div></div>`;
+  }
+
+  if (s.stage === "done") {
+    h += `<div class="card"><a class="dl" href="/jobs/${jobId}/download">⬇ Download your game
+          (${(s.zip_bytes/1048576).toFixed(1)} MB)</a>
+      <p class="steps">1. Get the free Ren'Py SDK at renpy.org &nbsp;·&nbsp;
+        2. Unzip into its Projects folder &nbsp;·&nbsp; 3. Launch and play.<br>
+        Your choices change the story — play it twice.</p></div>`;
+    if (s.lint) h += `<div class="card muted">Lint: <pre>${s.lint.replace(/</g,"&lt;")}</pre></div>`;
+  }
+  $("#status").innerHTML = h;
+}
+
+async function poll() {
+  if (!jobId) return;
+  clearTimeout(timer);
+  try {
+    const r = await fetch(`/jobs/${jobId}`);
+    if (r.status === 404) { localStorage.removeItem("job"); jobId = null; return; }
+    const s = await r.json();
+    render(s);
+    $("#go").disabled = ["writing","queued","generating","packaging","queued_media"].includes(s.stage);
+    if (s.stage !== "done" && s.stage !== "error") timer = setTimeout(poll, 2500);
+    else if (s.stage === "error") timer = setTimeout(poll, 8000);
+  } catch (e) { timer = setTimeout(poll, 5000); }
+}
+poll();
+</script>
+</body>
+</html>
