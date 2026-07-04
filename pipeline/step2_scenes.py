@@ -64,6 +64,9 @@ Rules:
   whose inner monologue is voiced over the scenes.
 - AT LEAST ONE scene must offer a real branch: 2+ choices whose goto lead to
   DIFFERENT scenes (this is an interactive film; a linear graph is invalid).
+- CONSISTENCY: every "next" and every choice "goto" value MUST be EXACTLY one
+  of the scene ids defined in "scenes" (or null for the final scene). Do not
+  reference ids you did not define.
 """
 
 SYSTEM = ("You are a meticulous technical director converting a screenplay into "
@@ -81,17 +84,31 @@ def run():
     user = f"SCREENPLAY:\n\n{script}\n\n{hint}"
 
     print(f"[step2] screenplay -> scene graph ({config.LLM_MODEL}) ...")
-    graph = qwen_client.chat_json(SYSTEM, user)
+    try:
+        graph = validate_and_fix(qwen_client.chat_json(SYSTEM, user))
+    except qwen_client.QwenError as e:
+        print(f"[step2] first graph invalid ({e}); regenerating once")
+        fix0 = (user + "\n\nYour previous attempt produced a disconnected "
+                "graph. Every next/goto MUST exactly match a defined scene id "
+                "and every scene must be reachable from start.")
+        graph = validate_and_fix(qwen_client.chat_json(SYSTEM, fix0))
     if not has_real_branch(graph):
         # One corrective retry: an interactive film needs at least one branch.
-        print("[step2] graph is linear; asking the model to add a branch point")
-        fix = (user + "\n\nYour previous graph had NO real branch. Regenerate it "
-               "so at least one scene offers 2+ choices leading to DIFFERENT "
-               "scene chains that later rejoin.")
-        retry = qwen_client.chat_json(SYSTEM, fix)
-        if has_real_branch(retry):
-            graph = retry
-    graph = validate_and_fix(graph)
+        # (Checked AFTER validation so repaired/pruned graphs are what we judge.)
+        print("[step2] validated graph is linear; asking for a branch point")
+        fix = (user + "\n\nYour previous graph had NO real branch after "
+               "validation. Regenerate it so at least one scene offers 2+ "
+               "choices whose goto lead to DIFFERENT scene chains that later "
+               "rejoin, and make sure every next/goto exactly matches a "
+               "defined scene id.")
+        try:
+            retry = validate_and_fix(qwen_client.chat_json(SYSTEM, fix))
+            if has_real_branch(retry):
+                graph = retry
+            else:
+                print("[step2] WARNING: retry still linear; keeping first graph")
+        except qwen_client.QwenError as e:
+            print(f"[step2] WARNING: branch retry failed ({e}); keeping first graph")
 
     config.SCENES_JSON.write_text(json.dumps(graph, indent=2, ensure_ascii=False),
                                   encoding="utf-8")
@@ -116,6 +133,23 @@ def main_path(graph):
 def main_path_total(graph):
     return sum(int(graph["scenes"][s].get("duration", config.CLIP_SECONDS_DEFAULT))
                for s in main_path(graph))
+
+
+def _repair_link(target, scenes):
+    """Best-effort match of a dangling scene reference to a real scene id.
+
+    Handles the common failure where the model links to a shorthand id
+    ("s3") but named the scene with a suffix ("s3_choice"), or vice versa.
+    Returns None when nothing plausibly matches.
+    """
+    cands = [sid for sid in scenes
+             if sid.startswith(target + "_") or target.startswith(sid + "_")]
+    if not cands:
+        cands = [sid for sid in scenes
+                 if sid.startswith(target) or target.startswith(sid)]
+    if not cands:
+        return None
+    return sorted(cands, key=lambda sid: (len(sid), sid))[0]
 
 
 def has_real_branch(graph):
@@ -174,20 +208,40 @@ def validate_and_fix(graph):
         s.setdefault("narration", [])
         s.setdefault("characters", [])
 
-    # Drop choices that point to unknown scenes; keep the graph connected.
+    # Repair links before judging connectivity: models sometimes reference a
+    # shorthand id ("s3") when the scene is named "s3_choice". A broken link
+    # must not cascade into pruning the whole downstream story.
+    for sid, s in scenes.items():
+        nxt = s.get("next")
+        if nxt and nxt not in scenes:
+            fixed = _repair_link(nxt, scenes)
+            print(f"[step2] repairing {sid}.next: {nxt!r} -> {fixed!r}")
+            s["next"] = fixed
+        for c in s.get("choices") or []:
+            goto = c.get("goto")
+            if goto and goto not in scenes:
+                fixed = _repair_link(goto, scenes)
+                print(f"[step2] repairing {sid} choice goto: {goto!r} -> {fixed!r}")
+                c["goto"] = fixed
+
+    # Drop choices that still point nowhere.
     for s in scenes.values():
         if s.get("choices"):
             s["choices"] = [c for c in s["choices"] if c.get("goto") in scenes]
             if not s["choices"]:
                 s.pop("choices", None)
-        if s.get("next") not in scenes:
-            s["next"] = None
 
-    # Prune scenes unreachable from start (they'd cost media money for nothing).
+    # Last resort: prune scenes still unreachable from start (they'd cost
+    # media money for nothing). After link repair this should be rare; a large
+    # prune means the model produced a genuinely disconnected graph.
     orphans = set(scenes) - reachable_ids(graph)
-    for sid in orphans:
-        del scenes[sid]
     if orphans:
+        if len(orphans) > len(scenes) // 2:
+            raise qwen_client.QwenError(
+                f"scene graph is mostly disconnected ({len(orphans)}/{len(scenes)} "
+                f"unreachable: {sorted(orphans)}); regenerate step 2")
+        for sid in orphans:
+            del scenes[sid]
         print(f"[step2] pruned unreachable scenes: {sorted(orphans)}")
 
     # Rescale main-path durations toward TARGET_SECONDS if out of band.
