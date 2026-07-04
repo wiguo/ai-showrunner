@@ -32,7 +32,7 @@ video_game_scripts.txt
 options for happyhorse.txt
 ENTROPY_story.txt
 ENTROPY_transcript.txt
-*.png
+/*.png
 *.rpyc
 
 # OS / editor
