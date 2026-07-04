@@ -15,9 +15,20 @@ then hands you the playable game. A full studio in a textbox.
 
 ## Project story (draft)
 
-**Inspiration.** Interactive films are magical and absurdly expensive: a
-writer, a storyboard artist, a film crew, voice actors, an editor, a game
-programmer. We asked: can one agent be the whole studio?
+**Inspiration.** I've been a fan of interactive video games for years, and
+I've always dreamed of shipping one of my own. But every time I looked into
+it, the answer was the same: you need a team — a writer, a storyboard artist,
+a film crew, voice actors, an editor, a game programmer. As one person, I
+never got past the first page of ideas.
+
+Qwen Cloud changed that math. For the first time, everything a studio does
+lives behind one API key: a model that writes (qwen3.7-max), models that see
+and paint (wan t2i), a model that films (happyhorse i2v), and a model that
+speaks (qwen tts). So I asked the obvious question: if the whole crew is in
+one place, can one autonomous agent BE the studio? Once Upon a Line is my
+answer — and my first game credit. The economics are almost absurd: a
+complete voiced, subtitled, branching interactive film costs a few dollars
+of API calls and one sentence of imagination.
 
 **What it does.** You give it a premise ("a lighthouse keeper discovers the
 fog is alive…"). The agent:
