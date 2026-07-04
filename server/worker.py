@@ -84,7 +84,7 @@ def _configure(job_id):
 
 def _phase_a(job_id):
     status = _configure(job_id)
-    jobs.update_status(job_id, stage="writing")
+    jobs.update_status(job_id, stage="writing", error=None)
     step1_expand.run(idea_text=status["story"])
     step2_scenes.run()
     step_intro.run(resume=True)
@@ -95,7 +95,7 @@ def _phase_a(job_id):
 
 def _phase_b(job_id):
     _configure(job_id)
-    jobs.update_status(job_id, stage="generating")
+    jobs.update_status(job_id, stage="generating", error=None)
     step3_frames.run(resume=True)
     step4_clips.run(resume=True)
     step_monologue.run(resume=True)

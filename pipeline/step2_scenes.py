@@ -184,6 +184,21 @@ def validate_and_fix(graph):
     graph.setdefault("characters", [])
     scenes = graph["scenes"]
 
+    # Normalize shapes the model occasionally gets wrong: characters as plain
+    # name strings, choices as plain label strings (both crash .get() later).
+    norm_chars = []
+    for c in graph["characters"]:
+        if isinstance(c, str):
+            c = {"id": c.strip().lower().replace(" ", "_"), "name": c.strip(),
+                 "appearance": ""}
+        if isinstance(c, dict) and c.get("id"):
+            c.setdefault("name", c["id"])
+            norm_chars.append(c)
+    graph["characters"] = norm_chars
+    for s in scenes.values():
+        if isinstance(s.get("choices"), list):
+            s["choices"] = [c for c in s["choices"] if isinstance(c, dict)]
+
     # Start scene must exist; fall back to the first declared scene.
     if graph["start"] not in scenes:
         graph["start"] = next(iter(scenes))

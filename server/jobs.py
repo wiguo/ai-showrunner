@@ -99,7 +99,7 @@ def progress(job_id):
         out["characters"] = [
             {"name": c.get("name"), "gender": c.get("gender"),
              "appearance": c.get("appearance", "")}
-            for c in graph.get("characters", [])]
+            for c in graph.get("characters", []) if isinstance(c, dict)]
         out["intro"] = (graph.get("intro") or {}).get("narration")
 
     script = build / "script.md"
