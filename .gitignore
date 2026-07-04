@@ -23,6 +23,18 @@ __pycache__/
 .venv/
 venv/
 
+# Local scratch / experiment leftovers (not part of the project)
+databricks_mcp.log
+concat_list.txt
+prompt.txt
+prompt2.txt
+video_game_scripts.txt
+options for happyhorse.txt
+ENTROPY_story.txt
+ENTROPY_transcript.txt
+*.png
+*.rpyc
+
 # OS / editor
 Thumbs.db
 .DS_Store

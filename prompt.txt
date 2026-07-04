@@ -1,7 +1,0 @@
-Ultra-realistic 5-second cinematic video. A middle-aged Asian male data scientist works late at night in a modern technology office. He has short black hair, wears black-framed rectangular glasses, a casual button-down shirt with rolled-up sleeves, and has the appearance of a typical experienced IT professional—focused, analytical, and slightly tired from long hours of work.
-
-He sits at a workstation with multiple monitors displaying Python code, machine learning pipeline workflows, model training dashboards, and data visualizations. He types rapidly on a mechanical keyboard, occasionally moving the mouse to inspect model metrics and connect workflow components. His expression is concentrated and thoughtful.
-
-Camera starts from behind his shoulder, showing the glowing screens, then slowly pushes in toward his face. The monitor light casts soft blue highlights on his glasses and face. Subtle reflections appear on the lenses without obscuring his eyes. Outside the large office windows, a city skyline shines against the night sky.
-
-Photorealistic, cinematic lighting, realistic office environment, natural body movements, shallow depth of field, smooth camera motion, professional technology workplace, 4K HDR, highly detailed, realistic skin texture, realistic hand movements, no text overlays, no subtitles, no logos, no watermark, no visual artifacts.

@@ -1,9 +1,0 @@
-Useful options
-
-- --resolution 720P|1080P (default 1080P)
-- --ratio 16:9|9:16|1:1|... (default 16:9)
-- --duration 3..15 seconds (default 5)
-- --no-watermark to drop the HappyHorse watermark
-- --seed <n> for reproducible-ish output
-- --output myvideo.mp4 (default output.mp4)
-- --print-url-only to just print the video URL without downloading

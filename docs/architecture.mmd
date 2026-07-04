@@ -1,0 +1,31 @@
+flowchart TB
+    subgraph Client["Judge / user browser"]
+        UI["Single-page UI\nstory composer · budget approval · live scene grid · download"]
+    end
+
+    subgraph ALI["Alibaba Cloud — Simple Application Server (Docker)"]
+        API["FastAPI  server/app.py\nPOST /jobs · GET /jobs/{id} · confirm · download"]
+        QUEUE["Job queue (concurrency 1)\nper-job dir isolation  jobs/<id>/"]
+        WORKER["Worker  server/worker.py"]
+        subgraph PIPE["Showrunner pipeline (resumable stages)"]
+            S1["1 Screenplay\nqwen3.7-max"]
+            S2["2 Branching scene graph\nqwen3.7-max JSON + validation"]
+            S3["3 Intro narration\nqwen3.7-max"]
+            GATE{{"BUDGET GATE\nuser approves estimated cost"}}
+            S4["4 Keyframes\nwan2.6-t2i (seeded, style-locked)"]
+            S5["5 Video clips\nhappyhorse-1.1-i2v\n(quota fallback chain)"]
+            S6["6 Inner monologue TTS + SRT\ncosyvoice-v3-plus"]
+            S7["7 Narrator voice\ncosyvoice-v3-plus"]
+            S8["8 Ren'Py assembly\nffmpeg mux voice + burn subtitles\nwebm convert · headless lint"]
+        end
+        ZIP["game.zip\ncomplete Ren'Py project"]
+    end
+
+    QWEN["Qwen Cloud (intl)\ndashscope-intl.aliyuncs.com\nchat · t2i · i2v · tts async tasks"]
+
+    UI -->|"story premise"| API --> QUEUE --> WORKER
+    WORKER --> S1 --> S2 --> S3 --> GATE
+    GATE -->|"approved"| S4 --> S5 --> S6 --> S7 --> S8 --> ZIP
+    S1 & S2 & S3 & S4 & S5 & S6 & S7 -.->|"API calls"| QWEN
+    UI <-->|"poll progress + thumbnails"| API
+    ZIP -->|"download"| UI
