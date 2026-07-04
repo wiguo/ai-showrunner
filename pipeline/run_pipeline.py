@@ -24,6 +24,8 @@ def parse_args():
     p = argparse.ArgumentParser(description="Story -> interactive Ren'Py video pipeline.")
     p.add_argument("--idea", help="Path to a one-line idea file "
                    "(default: examples/idea.txt).")
+    p.add_argument("--job-dir", help="Isolate all inputs/outputs under this "
+                   "directory (fresh build/ + renpy_project/ per job).")
     p.add_argument("--only", choices=STEPS, help="Run a single step.")
     p.add_argument("--dry-run", action="store_true",
                    help="Run only step1+step2 (text), then stop.")
@@ -36,8 +38,8 @@ def parse_args():
     p.add_argument("--no-resume", action="store_true",
                    help="Regenerate even if outputs exist.")
     p.add_argument("--video-flash", action="store_true",
-                   help="Use the first-frame-only flash model for clips "
-                        "(wan2.6-i2v-flash; separate free quota).")
+                   help="Force the first-frame-only chain even when "
+                        "I2V_FIRSTLAST_MODEL is configured.")
     p.add_argument("--no-voice", action="store_true",
                    help="Skip narration voice-over (step 6 runs by default).")
     return p.parse_args()
@@ -46,14 +48,16 @@ def parse_args():
 def main():
     args = parse_args()
     config.require_api_key()
+    if args.job_dir:
+        config.configure_job(args.job_dir)
     config.ensure_dirs()
 
     if args.idea:
+        import pathlib
         import shutil
-        config.EXAMPLES_DIR.mkdir(parents=True, exist_ok=True)
-        target = config.EXAMPLES_DIR / "idea.txt"
-        if str(target.resolve()) != str(__import__("pathlib").Path(args.idea).resolve()):
-            shutil.copy(args.idea, target)
+        config.IDEA_TXT.parent.mkdir(parents=True, exist_ok=True)
+        if str(config.IDEA_TXT.resolve()) != str(pathlib.Path(args.idea).resolve()):
+            shutil.copy(args.idea, config.IDEA_TXT)
     if args.resolution:
         config.RESOLUTION = args.resolution
     if args.max_scenes:

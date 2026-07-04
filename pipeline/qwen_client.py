@@ -135,13 +135,38 @@ def _multimodal_call(payload):
     return _extract_image_url(_multimodal_raw(payload))
 
 
-def tts(text, voice=None, language_type=None, model=None):
-    """Synthesize speech. Returns an audio URL (valid ~24h)."""
+def tts(text, voice, language_type=None, model=None, style=None):
+    """Synthesize speech. Returns an audio URL (valid ~24h).
+
+    Dispatches between the two DashScope TTS shapes and falls back from the
+    primary model (cosyvoice, async text2audio) to the fallback (qwen3-tts,
+    sync multimodal) when the primary is unavailable on this account.
+    """
+    attempts = [(model or config.TTS_MODEL, style or config.TTS_API_STYLE, voice)]
+    if model is None:  # only auto-fallback when the caller didn't pin a model
+        attempts.append((config.TTS_FALLBACK_MODEL, config.TTS_FALLBACK_STYLE, voice))
+    last_exc = None
+    for mdl, sty, vc in attempts:
+        try:
+            if sty == "async":
+                return _tts_async(text, vc, mdl)
+            return _tts_sync(text, vc, mdl, language_type)
+        except QwenError as e:
+            if _is_model_unavailable(e) or _is_quota(e):
+                print(f"  tts model {mdl} unavailable ({e.code}); trying fallback")
+                last_exc = e
+                continue
+            raise
+    raise last_exc or QwenError("tts failed")
+
+
+def _tts_sync(text, voice, model, language_type=None):
+    """qwen3-tts shape on the synchronous multimodal endpoint."""
     payload = {
-        "model": model or config.TTS_MODEL,
+        "model": model,
         "input": {
             "text": text[:600],
-            "voice": voice or config.TTS_VOICE,
+            "voice": voice,
             "language_type": language_type or config.TTS_LANGUAGE,
         },
     }
@@ -150,6 +175,23 @@ def tts(text, voice=None, language_type=None, model=None):
         return data["output"]["audio"]["url"]
     except (KeyError, TypeError):
         raise QwenError(f"no audio url in TTS response: {data}")
+
+
+def _tts_async(text, voice, model):
+    """cosyvoice shape on the async text2audio endpoint."""
+    payload = {
+        "model": model,
+        "input": {"text": text[:600]},
+        "parameters": {"voice": voice},
+    }
+    task_id = submit_async(config.TEXT2AUDIO_URL, payload)
+    output = poll_task(task_id)
+    url = (output.get("audio_url")
+           or (output.get("audio") or {}).get("url")
+           or ((output.get("results") or [{}])[0]).get("url"))
+    if not url:
+        raise QwenError(f"no audio url in async TTS result: {output}")
+    return url
 
 
 def _extract_image_url(data):
@@ -164,16 +206,54 @@ def _extract_image_url(data):
 
 
 def text_to_image(prompt, size=None, seed=None):
-    """First frame via z-image-turbo (synchronous). Returns the image URL.
+    """First frame. Walks config.T2I_CHAIN (async task models first, sync
+    multimodal models like z-image-turbo as fallback). Returns the image URL.
 
     prompt_extend=False keeps it at the cheapest tier; our prompts are already
     fully specified (style + character appearance).
     """
+    last_exc = None
+    for model in config.T2I_CHAIN:
+        try:
+            if model in config.T2I_SYNC_MODELS:
+                return _t2i_sync(model, prompt, size, seed)
+            return _t2i_async(model, prompt, size, seed)
+        except QwenError as e:
+            if _is_model_unavailable(e) or _is_quota(e):
+                print(f"  t2i model {model} unavailable ({e.code}); trying next")
+                last_exc = e
+                continue
+            raise
+    raise last_exc or QwenError("t2i failed: chain exhausted")
+
+
+def _t2i_async(model, prompt, size=None, seed=None):
+    """Async text2image task shape (wan2.6-t2i and friends)."""
+    parameters = {"size": size or config.IMAGE_SIZE, "n": 1,
+                  "prompt_extend": False}
+    if seed is not None:
+        parameters["seed"] = seed
+    payload = {
+        "model": model,
+        "input": {"prompt": prompt},
+        "parameters": parameters,
+    }
+    task_id = submit_async(config.TEXT2IMAGE_URL, payload)
+    output = poll_task(task_id)
+    results = output.get("results") or []
+    url = results[0].get("url") if results else None
+    if not url:
+        raise QwenError(f"no image url in t2i result: {output}")
+    return url
+
+
+def _t2i_sync(model, prompt, size=None, seed=None):
+    """Synchronous multimodal shape (z-image-turbo)."""
     parameters = {"prompt_extend": False, "size": size or config.IMAGE_SIZE}
     if seed is not None:
         parameters["seed"] = seed
     payload = {
-        "model": config.T2I_MODEL,
+        "model": model,
         "input": {"messages": [{"role": "user",
                                 "content": [{"text": prompt}]}]},
         "parameters": parameters,
@@ -235,12 +315,16 @@ def _i2v_with_downgrade(make_payload, resolution, duration):
 
 def image_to_video(first_url, last_url, prompt, duration,
                    resolution=None, watermark=None):
-    """Clip from first+last frames via wan2.7-i2v. Returns the video URL."""
+    """Clip from first+last frames (wan2.7-i2v class). Returns the video URL.
+
+    Only used when config.I2V_FIRSTLAST_MODEL is set; the default chain is
+    first-frame-only (happyhorse).
+    """
     watermark = config.CLIP_WATERMARK if watermark is None else watermark
 
     def make(res, dur):
         return {
-            "model": config.I2V_MODEL,
+            "model": config.I2V_FIRSTLAST_MODEL,
             "input": {"prompt": prompt, "media": [
                 {"type": "first_frame", "url": first_url},
                 {"type": "last_frame", "url": last_url},
@@ -253,14 +337,24 @@ def image_to_video(first_url, last_url, prompt, duration,
 
 def image_to_video_first(img_url, prompt, duration, resolution=None,
                          watermark=None, model=None):
-    """Clip from a single first frame (e.g. wan2.6-i2v-flash). Returns video URL.
+    """Clip from a single first frame. Returns the video URL.
 
-    Uses the `input.img_url` request shape (first-frame-only models).
+    Two request shapes exist for first-frame-only models:
+      * happyhorse-*: `input.media` with a first_frame entry
+      * wan*-i2v-flash: `input.img_url`
     """
     watermark = config.CLIP_WATERMARK if watermark is None else watermark
-    model = model or config.I2V_FLASH_MODEL
+    model = model or config.I2V_CHAIN[0]
 
     def make(res, dur):
+        if model.startswith("happyhorse"):
+            return {
+                "model": model,
+                "input": {"prompt": prompt,
+                          "media": [{"type": "first_frame", "url": img_url}]},
+                "parameters": {"resolution": res, "duration": dur,
+                               "watermark": watermark},
+            }
         return {
             "model": model,
             "input": {"img_url": img_url, "prompt": prompt},
@@ -268,6 +362,32 @@ def image_to_video_first(img_url, prompt, duration, resolution=None,
                            "prompt_extend": True, "watermark": watermark},
         }
     return _i2v_with_downgrade(make, resolution, duration)
+
+
+def generate_clip(img_url, prompt, duration, resolution=None, watermark=None):
+    """Generate a clip from a first frame, walking config.I2V_CHAIN.
+
+    A model whose quota is exhausted (or that this account can't access) is
+    skipped in favor of the next one; the friendly quota message is raised
+    only when every model in the chain is spent.
+    """
+    last_exc = None
+    for model in config.I2V_CHAIN:
+        try:
+            return image_to_video_first(img_url, prompt, duration,
+                                        resolution=resolution,
+                                        watermark=watermark, model=model)
+        except QwenError as e:
+            if _is_quota(e) or _is_model_unavailable(e):
+                print(f"  i2v model {model} unavailable/spent ({e.code}); trying next")
+                last_exc = e
+                continue
+            raise
+    raise QwenError(
+        "All video models in I2V_CHAIN are exhausted or unavailable. Enable "
+        "paid billing in the Qwen console (or extend I2V_CHAIN) and re-run; "
+        "completed clips are skipped on resume.",
+        getattr(last_exc, "code", None), getattr(last_exc, "http_status", None))
 
 
 def _downgrade_plan(resolution, duration):
@@ -285,6 +405,17 @@ def _is_quota(err):
     c = (err.code or "").lower()
     m = str(err).lower()
     return "quota" in c or "free quota" in m or "exhaust" in m
+
+
+def _is_model_unavailable(err):
+    """Model not in this account's catalog (name unknown or no access)."""
+    c = (err.code or "").lower()
+    m = str(err).lower()
+    if err.http_status in (401, 403, 404) and "model" in m:
+        return True
+    return ("model" in m and ("not exist" in m or "cannot be found" in m
+                              or "unsupported" in m or "access" in m
+                              or "no permission" in m)) or "invalidmodel" in c
 
 
 def _is_limit_param(err):
@@ -324,16 +455,46 @@ def _chat_client():
     return _openai_client
 
 
-def chat_text(system, user, model=None, temperature=0.8, max_tokens=8000):
-    """Plain text chat completion. Returns the assistant message string."""
-    resp = _chat_client().chat.completions.create(
-        model=model or config.LLM_MODEL,
-        messages=[{"role": "system", "content": system},
-                  {"role": "user", "content": user}],
-        temperature=temperature,
-        max_tokens=max_tokens,
-    )
-    return resp.choices[0].message.content
+def _llm_candidates(model=None):
+    if model:
+        return [model]
+    return [config.LLM_MODEL] + list(config.LLM_FALLBACKS)
+
+
+def chat_text(system, user, model=None, temperature=0.8, max_tokens=8000,
+              response_format=None):
+    """Plain text chat completion. Returns the assistant message string.
+
+    Falls back across config.LLM_FALLBACKS if the primary model name is not
+    in this account's catalog.
+    """
+    extra = {"response_format": response_format} if response_format else {}
+    last_exc = None
+    for mdl in _llm_candidates(model):
+        try:
+            resp = _chat_client().chat.completions.create(
+                model=mdl,
+                messages=[{"role": "system", "content": system},
+                          {"role": "user", "content": user}],
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **extra,
+            )
+            config.LLM_MODEL = mdl  # pin the working model for later calls
+            return resp.choices[0].message.content
+        except Exception as e:
+            if _looks_like_bad_model(e):
+                print(f"  chat model {mdl} unavailable; trying next")
+                last_exc = e
+                continue
+            raise
+    raise last_exc
+
+
+def _looks_like_bad_model(exc):
+    m = str(exc).lower()
+    return "model" in m and ("not exist" in m or "invalid" in m
+                             or "access" in m or "not found" in m)
 
 
 def chat_json(system, user, model=None, temperature=0.5, max_tokens=8000,
@@ -343,15 +504,9 @@ def chat_json(system, user, model=None, temperature=0.5, max_tokens=8000,
                          "nothing else. Do not wrap it in markdown fences.")
     last_err = None
     for attempt in range(retries + 1):
-        resp = _chat_client().chat.completions.create(
-            model=model or config.LLM_MODEL,
-            messages=[{"role": "system", "content": sys_json},
-                      {"role": "user", "content": user}],
-            temperature=temperature,
-            max_tokens=max_tokens,
-            response_format={"type": "json_object"},
-        )
-        text = resp.choices[0].message.content
+        text = chat_text(sys_json, user, model=model,
+                         temperature=temperature, max_tokens=max_tokens,
+                         response_format={"type": "json_object"})
         try:
             return json.loads(text)
         except json.JSONDecodeError as e:

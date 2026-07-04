@@ -1,7 +1,12 @@
-"""Step 4: generate one video clip per scene from its first+last frames.
+"""Step 4: generate one video clip per scene from its keyframe(s).
 
-Uses wan2.7-i2v with the frame URLs recorded in build/urls.json. Downloads each
-MP4 to build/clips/. Resumable: scenes whose clip already exists are skipped.
+Default: first-frame-only i2v, walking config.I2V_CHAIN (happyhorse first,
+wan-flash fallbacks) so per-model quota exhaustion hops to the next model.
+If config.I2V_FIRSTLAST_MODEL is set and step 3 produced last frames, the
+first+last shape is used instead.
+
+Downloads each MP4 to build/clips/. Resumable: scenes whose clip already
+exists are skipped.
 
 Note: frame URLs are valid ~24h. If step 3 ran long ago, re-run step 3 first to
 refresh them.
@@ -32,20 +37,23 @@ def run(resume=True, resolution=None, flash=False):
 
         duration = int(scene.get("duration", config.CLIP_SECONDS_DEFAULT))
         motion = scene.get("motion_prompt") or scene.get("summary", "")
-        engine = config.I2V_FLASH_MODEL if flash else config.I2V_MODEL
+        use_firstlast = (config.I2V_FIRSTLAST_MODEL and not flash
+                         and urls[sid].get("last"))
+        engine = (config.I2V_FIRSTLAST_MODEL if use_firstlast
+                  else "+".join(config.I2V_CHAIN))
         print(f"[step4] {sid}: i2v ({duration}s, "
               f"{resolution or config.RESOLUTION}, {engine}) ...")
-        if flash:
-            video_url = qwen_client.image_to_video_first(
-                img_url=urls[sid]["first"],
+        if use_firstlast:
+            video_url = qwen_client.image_to_video(
+                first_url=urls[sid]["first"],
+                last_url=urls[sid]["last"],
                 prompt=motion,
                 duration=duration,
                 resolution=resolution,
             )
         else:
-            video_url = qwen_client.image_to_video(
-                first_url=urls[sid]["first"],
-                last_url=urls[sid]["last"],
+            video_url = qwen_client.generate_clip(
+                img_url=urls[sid]["first"],
                 prompt=motion,
                 duration=duration,
                 resolution=resolution,

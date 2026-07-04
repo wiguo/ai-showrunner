@@ -15,7 +15,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from . import config, media_utils
+from . import config, media_utils, voices
 
 
 def _esc(text):
@@ -140,8 +140,8 @@ def _script_rpy(graph):
     title = graph.get("title", "Interactive Story")
     intro_lines = (graph.get("intro") or {}).get("narration") or []
 
-    chars = graph.get("characters") or []
-    mc_name = chars[0].get("name", "") if chars else ""
+    protag = voices.protagonist_of(graph)
+    mc_name = protag.get("name", "") if protag else ""
 
     lines = []
     lines.append("# Auto-generated interactive video script. Do not edit by hand.")
@@ -246,6 +246,10 @@ def run():
         if not mp4.exists():
             missing.append(sid)
             continue
+        # A crashed mux can leave a 0-byte webm which would resume-skip forever.
+        if webm.exists() and webm.stat().st_size == 0:
+            print(f"[step5] {sid}: removing 0-byte webm from a failed mux")
+            webm.unlink()
         if webm.exists():
             print(f"[step5] {sid}: webm exists, skipping convert")
             continue
@@ -258,6 +262,10 @@ def run():
         else:
             print(f"[step5] {sid}: converting mp4 -> webm ...")
             media_utils.mp4_to_webm(mp4, webm)
+        if not webm.exists() or webm.stat().st_size < 10_000:
+            raise RuntimeError(
+                f"[step5] {sid}: webm conversion produced a broken file "
+                f"({webm}); check ffmpeg output above")
 
     if missing:
         print(f"[step5] WARNING: no clip for scenes {missing} "
@@ -275,7 +283,10 @@ def run():
 
 
 def _lint():
-    """Run `renpy lint` if the SDK executable is available."""
+    """Run `renpy lint` if the SDK executable is available (non-fatal).
+
+    Output is also written to build/lint.txt so the web server can surface it.
+    """
     exe = config.RENPY_EXE
     if not exe or not Path(exe).exists():
         return
@@ -283,6 +294,10 @@ def _lint():
     proc = subprocess.run([exe, str(config.RENPY_DIR), "lint"],
                           capture_output=True, text=True)
     out = (proc.stdout or "") + (proc.stderr or "")
+    try:
+        (config.BUILD_DIR / "lint.txt").write_text(out, encoding="utf-8")
+    except OSError:
+        pass
     if "error" in out.lower() or proc.returncode != 0:
         print("[step5] LINT ISSUES:\n" + out[-2000:])
     else:

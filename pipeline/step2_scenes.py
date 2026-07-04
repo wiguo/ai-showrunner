@@ -19,8 +19,11 @@ SCHEMA_HINT = """Produce a JSON object with EXACTLY this shape:
   "characters": [
     {"id": "snake_case_id", "name": "string",
      "appearance": "fixed detailed visual description",
+     "gender": "female|male|neutral",
+     "voice_tone": "e.g. warm, wry, weary",
      "seed": 1111}
   ],
+  "protagonist": "snake_case_id of the single viewpoint character",
   "start": "s1",
   "scenes": {
     "s1": {
@@ -57,6 +60,10 @@ Rules:
   The alternate branch scenes get their own sensible durations too.
 - first_frame_prompt MUST embed global_style and the appearance of any characters
   present, so the look stays consistent across scenes.
+- "protagonist" MUST be one of the character ids: the single viewpoint character
+  whose inner monologue is voiced over the scenes.
+- AT LEAST ONE scene must offer a real branch: 2+ choices whose goto lead to
+  DIFFERENT scenes (this is an interactive film; a linear graph is invalid).
 """
 
 SYSTEM = ("You are a meticulous technical director converting a screenplay into "
@@ -75,6 +82,15 @@ def run():
 
     print(f"[step2] screenplay -> scene graph ({config.LLM_MODEL}) ...")
     graph = qwen_client.chat_json(SYSTEM, user)
+    if not has_real_branch(graph):
+        # One corrective retry: an interactive film needs at least one branch.
+        print("[step2] graph is linear; asking the model to add a branch point")
+        fix = (user + "\n\nYour previous graph had NO real branch. Regenerate it "
+               "so at least one scene offers 2+ choices leading to DIFFERENT "
+               "scene chains that later rejoin.")
+        retry = qwen_client.chat_json(SYSTEM, fix)
+        if has_real_branch(retry):
+            graph = retry
     graph = validate_and_fix(graph)
 
     config.SCENES_JSON.write_text(json.dumps(graph, indent=2, ensure_ascii=False),
@@ -102,6 +118,30 @@ def main_path_total(graph):
                for s in main_path(graph))
 
 
+def has_real_branch(graph):
+    """True if some scene offers 2+ choices leading to different scenes."""
+    for s in (graph.get("scenes") or {}).values():
+        gotos = {c.get("goto") for c in s.get("choices") or [] if c.get("goto")}
+        if len(gotos) >= 2:
+            return True
+    return False
+
+
+def reachable_ids(graph):
+    """Scene ids reachable from start via next + choice gotos."""
+    scenes = graph["scenes"]
+    seen, stack = set(), [graph.get("start")]
+    while stack:
+        sid = stack.pop()
+        if not sid or sid in seen or sid not in scenes:
+            continue
+        seen.add(sid)
+        s = scenes[sid]
+        stack.append(s.get("next"))
+        stack.extend(c.get("goto") for c in s.get("choices") or [])
+    return seen
+
+
 def validate_and_fix(graph):
     if "scenes" not in graph or not graph["scenes"]:
         raise qwen_client.QwenError("scene graph has no scenes")
@@ -109,6 +149,22 @@ def validate_and_fix(graph):
     graph.setdefault("global_style", "")
     graph.setdefault("characters", [])
     scenes = graph["scenes"]
+
+    # Start scene must exist; fall back to the first declared scene.
+    if graph["start"] not in scenes:
+        graph["start"] = next(iter(scenes))
+
+    # Protagonist must be a real character id (voices + seeds key off it).
+    char_ids = [c.get("id") for c in graph["characters"] if c.get("id")]
+    if graph.get("protagonist") not in char_ids and char_ids:
+        counts = {cid: 0 for cid in char_ids}
+        for s in scenes.values():
+            for cid in s.get("characters", []):
+                if cid in counts:
+                    counts[cid] += 1
+        graph["protagonist"] = max(counts, key=counts.get)
+        print(f"[step2] protagonist defaulted to most-present character: "
+              f"{graph['protagonist']}")
 
     # Clamp every duration to the model's [min,max].
     for s in scenes.values():
@@ -124,6 +180,15 @@ def validate_and_fix(graph):
             s["choices"] = [c for c in s["choices"] if c.get("goto") in scenes]
             if not s["choices"]:
                 s.pop("choices", None)
+        if s.get("next") not in scenes:
+            s["next"] = None
+
+    # Prune scenes unreachable from start (they'd cost media money for nothing).
+    orphans = set(scenes) - reachable_ids(graph)
+    for sid in orphans:
+        del scenes[sid]
+    if orphans:
+        print(f"[step2] pruned unreachable scenes: {sorted(orphans)}")
 
     # Rescale main-path durations toward TARGET_SECONDS if out of band.
     total = main_path_total(graph)

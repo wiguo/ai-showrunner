@@ -9,7 +9,7 @@ Resumable: existing voice files are skipped.
 
 import json
 
-from . import config, qwen_client, media_utils
+from . import config, qwen_client, media_utils, voices
 
 
 def _sniff_ext(data):
@@ -41,6 +41,7 @@ def run(resume=True, voice=None):
     if graph.get("intro", {}).get("narration"):
         items.append(("intro", {"narration": graph["intro"]["narration"]}))
 
+    narrator = voice or voices.select_voices(graph)["narrator"]
     count = 0
     for sid, scene in items:
         for idx, line in enumerate(scene.get("narration", [])):
@@ -51,9 +52,8 @@ def run(resume=True, voice=None):
                 print(f"[step6] {sid}_{idx}: voice exists, skipping")
                 count += 1
                 continue
-            print(f"[step6] {sid}_{idx}: TTS ({config.TTS_MODEL}, "
-                  f"{voice or config.TTS_VOICE}) ...")
-            url = qwen_client.tts(text, voice=voice)
+            print(f"[step6] {sid}_{idx}: TTS ({config.TTS_MODEL}, {narrator}) ...")
+            url = qwen_client.tts(text, voice=narrator)
             import requests
             data = requests.get(url, timeout=120).content
             # Qwen streams WAV with a corrupt RIFF size header; transcode to clean

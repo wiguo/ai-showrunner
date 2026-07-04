@@ -1,11 +1,16 @@
 """Central configuration for the story -> Ren'Py pipeline.
 
-Everything tunable lives here: API endpoints, model names, runtime budget,
-guardrails, and filesystem layout. The whole pipeline runs on a single
-DASHSCOPE_API_KEY.
+Everything tunable lives here: API endpoints, model registry (with fallback
+chains), runtime budget, guardrails, and filesystem layout. The whole pipeline
+runs on a single DASHSCOPE_API_KEY (Qwen Model Studio international).
+
+Two layers of configurability:
+  * env vars for deploy-time overrides (model names, RENPY_EXE, ...)
+  * configure_job(job_dir) for per-job path isolation (web server mode)
 """
 
 import os
+import sys
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -14,31 +19,59 @@ from pathlib import Path
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
 
 # ---------------------------------------------------------------------------
-# Endpoints
+# Endpoints (Qwen Model Studio international)
 # ---------------------------------------------------------------------------
-# DashScope native (image + video tasks)
 BASE_URL = "https://dashscope-intl.aliyuncs.com/api/v1"
-TEXT2IMAGE_URL = f"{BASE_URL}/services/aigc/text2image/image-synthesis"  # qwen-image async
-# Synchronous multimodal endpoint, shared by z-image-turbo (t2i) and qwen-image-edit
-MULTIMODAL_URL = f"{BASE_URL}/services/aigc/multimodal-generation/generation"
+TEXT2IMAGE_URL = f"{BASE_URL}/services/aigc/text2image/image-synthesis"   # async t2i
+MULTIMODAL_URL = f"{BASE_URL}/services/aigc/multimodal-generation/generation"  # sync t2i/edit/tts
 IMAGE_EDIT_URL = MULTIMODAL_URL  # backwards-compatible alias
 VIDEO_SYNTH_URL = f"{BASE_URL}/services/aigc/video-generation/video-synthesis"
+TEXT2AUDIO_URL = f"{BASE_URL}/services/aigc/text2audio/generation"        # async tts
 TASK_URL = f"{BASE_URL}/tasks/{{task_id}}"
 
 # OpenAI-compatible chat (Qwen LLM for story steps)
 CHAT_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 
 # ---------------------------------------------------------------------------
-# Models
+# Model registry.
+#
+# Chains are tried in order; on quota exhaustion / model-not-found the client
+# walks to the next entry, so the pipeline survives per-model free-quota
+# ceilings and catalog differences between accounts. Every entry is
+# env-overridable (comma-separated for chains) so smoke-test findings can be
+# applied without code edits: run `python -m scripts.smoke_test` first.
 # ---------------------------------------------------------------------------
-LLM_MODEL = "qwen3-max"            # story brain (configurable: qwen-plus is cheaper)
-T2I_MODEL = "z-image-turbo"        # first frame (cheapest text-to-image, $0.015/img)
-EDIT_MODEL = "qwen-image-edit"     # last frame (cheapest image edit, $0.045/img)
-I2V_MODEL = "wan2.7-i2v"           # clip generation (first+last frame i2v)
-I2V_FLASH_MODEL = os.getenv("I2V_FLASH_MODEL", "wan2.6-i2v-flash")  # first-frame-only fallback (env-overridable to hop free quotas)
-TTS_MODEL = "qwen3-tts-flash"      # narration voice-over
-TTS_VOICE = "Cherry"               # narrator voice (intro)
-CHAR_VOICE = "Kai"                 # main character's inner-monologue voice
+def _chain(env, default):
+    raw = os.getenv(env, "")
+    return [m.strip() for m in raw.split(",") if m.strip()] or default
+
+
+LLM_MODEL = os.getenv("LLM_MODEL", "qwen3.7-max")
+LLM_FALLBACKS = _chain("LLM_FALLBACKS", ["qwen3-max", "qwen-plus"])
+
+# First frames. "async" entries use the text2image task endpoint,
+# "sync" entries the multimodal endpoint (z-image-turbo shape).
+T2I_CHAIN = _chain("T2I_CHAIN", ["wan2.6-t2i", "z-image-turbo"])
+T2I_SYNC_MODELS = {"z-image-turbo"}          # models needing the sync shape
+
+# Last-frame image editing. happyhorse i2v is first-frame-only, so last
+# frames are OFF by default; flip NEED_LAST_FRAME if using a first+last model.
+EDIT_MODEL = os.getenv("EDIT_MODEL", "qwen-image-edit")
+NEED_LAST_FRAME = os.getenv("NEED_LAST_FRAME", "0") == "1"
+
+# Clips. happyhorse-1.1-i2v: first-frame-only, 3-15s, 720P/1080P, media shape.
+# wan*-i2v-flash models use the img_url shape (handled by the client).
+I2V_CHAIN = _chain("I2V_CHAIN", ["happyhorse-1.1-i2v", "wan2.6-i2v-flash",
+                                 "wan2.2-i2v-flash"])
+I2V_FIRSTLAST_MODEL = os.getenv("I2V_FIRSTLAST_MODEL", "")  # e.g. wan2.7-i2v if available
+
+# Voice synthesis. TTS_API_STYLE: "sync" = multimodal endpoint (qwen3-tts
+# shape), "async" = text2audio task endpoint (cosyvoice shape). The client
+# falls back across TTS_CHAIN entries: (model, style) pairs.
+TTS_MODEL = os.getenv("TTS_MODEL", "cosyvoice-v3-plus")
+TTS_API_STYLE = os.getenv("TTS_API_STYLE", "async")
+TTS_FALLBACK_MODEL = os.getenv("TTS_FALLBACK_MODEL", "qwen3-tts-flash")
+TTS_FALLBACK_STYLE = "sync"
 TTS_LANGUAGE = "Auto"
 
 # ---------------------------------------------------------------------------
@@ -47,20 +80,42 @@ TTS_LANGUAGE = "Auto"
 TARGET_SECONDS = 150          # aim for a single-playthrough runtime
 DURATION_MIN_TOTAL = 120      # accepted band lower bound
 DURATION_MAX_TOTAL = 180      # accepted band upper bound
-CLIP_SECONDS_DEFAULT = 10     # per-clip default (conservative; model allows 15)
-CLIP_SECONDS_MIN = 3          # wan2.7-i2v min
-CLIP_SECONDS_MAX = 15         # wan2.7-i2v max
+CLIP_SECONDS_DEFAULT = 10     # per-clip default
+CLIP_SECONDS_MIN = 3          # happyhorse-1.1-i2v allows 3-15s
+CLIP_SECONDS_MAX = 15
 SECONDS_PER_SCENE = 11        # used to derive target scene count
 
 # Derived target / cap on number of scenes
 TARGET_MAIN_SCENES = round(TARGET_SECONDS / SECONDS_PER_SCENE)  # ~14
 MAX_SCENES = 16               # main-path + a few branch alternatives
 
+# Web-mode hard caps (server clamps user requests to these)
+WEB_MAX_TARGET_SECONDS = int(os.getenv("WEB_MAX_TARGET_SECONDS", "150"))
+WEB_MAX_SCENES = int(os.getenv("WEB_MAX_SCENES", "12"))
+
+# Rough per-unit prices (USD) for the preview cost estimate shown to the user.
+PRICE_PER_IMAGE = 0.03
+PRICE_PER_VIDEO_SECOND = 0.08
+PRICE_PER_TTS_CALL = 0.002
+
+
+def estimate_cost(graph):
+    """Rough spend estimate for the media phase of a scene graph (USD)."""
+    scenes = graph.get("scenes", [])
+    n = len(scenes)
+    video_secs = sum(int(s.get("duration", CLIP_SECONDS_DEFAULT)) for s in scenes)
+    images = n * (2 if NEED_LAST_FRAME else 1)
+    tts_calls = n + len(graph.get("intro", {}).get("narration", []) or [""])
+    return round(images * PRICE_PER_IMAGE
+                 + video_secs * PRICE_PER_VIDEO_SECOND
+                 + tts_calls * PRICE_PER_TTS_CALL, 2)
+
+
 # ---------------------------------------------------------------------------
 # Media defaults (conservative for free-plan friendliness)
 # ---------------------------------------------------------------------------
 RESOLUTION = "720P"           # "720P" or "1080P"
-IMAGE_SIZE = "1280*720"       # 16:9 frame size for z-image-turbo (w*h, 512-2048)
+IMAGE_SIZE = "1280*720"       # 16:9 frame size (w*h)
 RATIO = "16:9"
 WATERMARK = False             # frames; clips set separately
 CLIP_WATERMARK = False
@@ -75,25 +130,49 @@ BACKOFF_BASE = 4              # seconds; exponential backoff base
 CONCURRENCY = 1               # submit one task at a time
 
 # ---------------------------------------------------------------------------
-# Filesystem layout
+# Filesystem layout. Module-level defaults point at the repo root (CLI mode);
+# configure_job() re-derives everything under a job dir (server mode).
 # ---------------------------------------------------------------------------
-ROOT = Path(__file__).resolve().parent.parent   # C:\qwen
-BUILD_DIR = ROOT / "build"
-FRAMES_DIR = BUILD_DIR / "frames"
-CLIPS_DIR = BUILD_DIR / "clips"
-MONO_DIR = BUILD_DIR / "monologue"
-SCRIPT_MD = BUILD_DIR / "script.md"
-SCENES_JSON = BUILD_DIR / "scenes.json"
-URLS_JSON = BUILD_DIR / "urls.json"
-RENPY_DIR = ROOT / "renpy_project"
-VOICE_DIR = RENPY_DIR / "game" / "voice"
+ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES_DIR = ROOT / "examples"
 
-# Ren'Py SDK executable (for optional auto-lint). Override with RENPY_EXE env var.
-RENPY_EXE = os.getenv(
-    "RENPY_EXE",
-    r"C:\Users\guowi\Downloads\renpy-8.3.4-sdk\renpy.exe",
-)
+
+def _set_paths(base: Path):
+    global BUILD_DIR, FRAMES_DIR, CLIPS_DIR, MONO_DIR, SCRIPT_MD, SCENES_JSON
+    global URLS_JSON, RENPY_DIR, VOICE_DIR, IDEA_TXT
+    BUILD_DIR = base / "build"
+    FRAMES_DIR = BUILD_DIR / "frames"
+    CLIPS_DIR = BUILD_DIR / "clips"
+    MONO_DIR = BUILD_DIR / "monologue"
+    SCRIPT_MD = BUILD_DIR / "script.md"
+    SCENES_JSON = BUILD_DIR / "scenes.json"
+    URLS_JSON = BUILD_DIR / "urls.json"
+    RENPY_DIR = base / "renpy_project"
+    VOICE_DIR = RENPY_DIR / "game" / "voice"
+    IDEA_TXT = BUILD_DIR / "idea.txt"
+
+
+_set_paths(ROOT)
+# CLI default: keep the historical idea location so old commands still work.
+IDEA_TXT = EXAMPLES_DIR / "idea.txt"
+
+
+def configure_job(job_dir):
+    """Isolate all pipeline inputs/outputs under one job directory.
+
+    Called by the web server before each job so runs never share artifacts
+    (stale scene-id collisions previously caused subtitle/voice mismatches).
+    """
+    base = Path(job_dir)
+    _set_paths(base)
+    ensure_dirs()
+    return base
+
+
+# Ren'Py SDK executable (for optional auto-lint). Override with RENPY_EXE.
+_DEFAULT_RENPY = ("/opt/renpy-sdk/renpy.sh" if sys.platform.startswith("linux")
+                  else r"C:\Users\guowi\Downloads\renpy-8.3.4-sdk\renpy.exe")
+RENPY_EXE = os.getenv("RENPY_EXE", _DEFAULT_RENPY)
 
 
 def ensure_dirs():

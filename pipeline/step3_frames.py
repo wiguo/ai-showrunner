@@ -1,8 +1,10 @@
-"""Step 3: generate first + last keyframes for each scene.
+"""Step 3: generate keyframes for each scene.
 
 For every scene:
-  1. first frame  -> qwen-image-plus (text-to-image)
-  2. last frame   -> qwen-image-2.0-pro (edit of the FIRST frame, for consistency)
+  1. first frame -> text-to-image (config.T2I_CHAIN)
+  2. last frame  -> image edit of the first frame, ONLY when
+     config.NEED_LAST_FRAME is on (first+last i2v models); the default
+     happyhorse chain is first-frame-only, so the edit call is skipped.
 
 Saves PNGs to build/frames/ and records the source URLs in build/urls.json.
 Resumable: scenes already present in urls.json (with files on disk) are skipped.
@@ -10,7 +12,7 @@ Resumable: scenes already present in urls.json (with files on disk) are skipped.
 
 import json
 
-from . import config, qwen_client
+from . import config, qwen_client, voices
 
 
 def _load_urls():
@@ -36,8 +38,8 @@ def _char_block(graph, scene):
 
 
 def _scene_seed(graph, idx):
-    chars = graph.get("characters", [])
-    base = int(chars[0]["seed"]) if chars and chars[0].get("seed") is not None else 1000
+    protag = voices.protagonist_of(graph)
+    base = int(protag["seed"]) if protag and protag.get("seed") is not None else 1000
     return (base + idx * 7) % 2147483647
 
 
@@ -65,8 +67,9 @@ def run(resume=True):
         first_png = config.FRAMES_DIR / f"{sid}_first.png"
         last_png = config.FRAMES_DIR / f"{sid}_last.png"
 
-        done = (sid in urls and urls[sid].get("first") and urls[sid].get("last")
-                and first_png.exists() and last_png.exists())
+        done = (sid in urls and urls[sid].get("first") and first_png.exists()
+                and (not config.NEED_LAST_FRAME
+                     or (urls[sid].get("last") and last_png.exists())))
         if resume and done:
             print(f"[step3] {sid}: already done, skipping")
             continue
@@ -76,18 +79,20 @@ def run(resume=True):
         first_prompt = _compose_first_prompt(graph, scene)
         first_url = qwen_client.text_to_image(first_prompt, seed=seed)
         qwen_client.download(first_url, first_png)
+        urls[sid] = {"first": first_url, "first_png": str(first_png)}
 
-        print(f"[step3] {sid}: last frame (edit of first) ...")
-        edit_instruction = scene.get("last_frame_edit") or (
-            "Keep the same characters and setting; advance the action slightly "
-            "to the end of the moment.")
-        last_url = qwen_client.image_edit(first_url, edit_instruction, seed=seed)
-        qwen_client.download(last_url, last_png)
+        if config.NEED_LAST_FRAME:
+            print(f"[step3] {sid}: last frame (edit of first) ...")
+            edit_instruction = scene.get("last_frame_edit") or (
+                "Keep the same characters and setting; advance the action "
+                "slightly to the end of the moment.")
+            last_url = qwen_client.image_edit(first_url, edit_instruction,
+                                              seed=seed)
+            qwen_client.download(last_url, last_png)
+            urls[sid].update({"last": last_url, "last_png": str(last_png)})
 
-        urls[sid] = {"first": first_url, "last": last_url,
-                     "first_png": str(first_png), "last_png": str(last_png)}
         _save_urls(urls)
-        print(f"[step3] {sid}: saved both frames")
+        print(f"[step3] {sid}: frames saved")
 
     print(f"[step3] done: {len(urls)} scenes have frames")
     return urls

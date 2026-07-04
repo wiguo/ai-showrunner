@@ -31,14 +31,16 @@ Numbered beats. For each: setting, what happens, camera, and any optional choice
 """
 
 
-def run():
+def run(idea_text=None):
     config.ensure_dirs()
-    idea_path = config.EXAMPLES_DIR / "idea.txt"
-    if not idea_path.exists():
-        raise SystemExit(f"missing input: {idea_path}")
-    idea = idea_path.read_text(encoding="utf-8").strip()
+    if idea_text is None:
+        idea_path = config.IDEA_TXT
+        if not idea_path.exists():
+            raise SystemExit(f"missing input: {idea_path}")
+        idea_text = idea_path.read_text(encoding="utf-8").strip()
+    idea = idea_text.strip()
     if not idea:
-        raise SystemExit(f"{idea_path} is empty")
+        raise SystemExit("story idea is empty")
 
     system = SYSTEM.format(target=config.TARGET_SECONDS,
                            scenes=config.TARGET_MAIN_SCENES)

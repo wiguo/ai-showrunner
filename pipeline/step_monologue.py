@@ -1,16 +1,17 @@
-"""Monologue stage: give the main character a first-person inner voice.
+"""Monologue stage: give the protagonist a first-person inner voice.
 
 For each scene, generate 1-2 short first-person inner-monologue lines (the
-protagonist's thoughts), then synthesize them in the character voice (Kai) and
-concatenate per scene into build/monologue/<sid>_all.ogg. Step 5 mixes that
-track into the clip so the character speaks over the video.
+protagonist's thoughts), then synthesize them in a voice matching the
+protagonist (auto-selected by pipeline.voices from the character's gender)
+and concatenate per scene into build/monologue/<sid>_all.ogg. Step 5 mixes
+that track into the clip so the character speaks over the video.
 
 Stored in scenes.json as scene["monologue"] = [lines]. Idempotent.
 """
 
 import json
 
-from . import config, qwen_client, media_utils
+from . import config, qwen_client, media_utils, voices
 
 SYSTEM = ("You write FIRST-PERSON inner monologue for the protagonist of a short "
           "film. These are the character's private thoughts, spoken in their own "
@@ -18,8 +19,8 @@ SYSTEM = ("You write FIRST-PERSON inner monologue for the protagonist of a short
 
 
 def _instruct(graph):
-    chars = graph.get("characters", [])
-    who = chars[0]["name"] if chars else "the protagonist"
+    protag = voices.protagonist_of(graph)
+    who = protag["name"] if protag else "the protagonist"
     scene_lines = []
     for sid, s in graph["scenes"].items():
         scene_lines.append(f'{sid} ({s.get("duration",6)}s): {s.get("summary","")}')
@@ -57,6 +58,7 @@ def run(resume=True):
 
     # Synthesize (character voice) + concat per scene + write synced subtitles.
     import requests
+    char_voice = voices.select_voices(graph)["protagonist"]
     for sid, scene in graph["scenes"].items():
         lines = scene.get("monologue") or []
         if not lines:
@@ -65,8 +67,8 @@ def run(resume=True):
         for idx, line in enumerate(lines):
             part = config.MONO_DIR / f"{sid}_{idx}.ogg"
             if not (resume and part.exists()):
-                print(f"[mono] {sid}_{idx}: TTS ({config.CHAR_VOICE}) ...")
-                url = qwen_client.tts(line, voice=config.CHAR_VOICE)
+                print(f"[mono] {sid}_{idx}: TTS ({char_voice}) ...")
+                url = qwen_client.tts(line, voice=char_voice)
                 raw = config.MONO_DIR / f"{sid}_{idx}_raw.wav"
                 raw.write_bytes(requests.get(url, timeout=120).content)
                 media_utils.to_ogg(raw, part)
