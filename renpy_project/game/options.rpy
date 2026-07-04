@@ -1,0 +1,9 @@
+define config.name = "Same Pay, Different Pain"
+define config.version = "1.0"
+define config.has_sound = True
+define config.has_music = True
+define config.check_conflicting_properties = True
+define config.screen_width = 1280
+define config.screen_height = 720
+define gui.init = None
+define config.window_title = "Same Pay, Different Pain"

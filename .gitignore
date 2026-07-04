@@ -1,0 +1,28 @@
+# Secrets
+.env
+
+# Pipeline artifacts (regenerated per run/job)
+build/
+jobs/
+
+# Generated game media (large binaries; the project code is committed, media is not)
+renpy_project/game/movies/
+renpy_project/game/voice/
+renpy_project/game/cache/
+renpy_project/game/saves/
+renpy_project/log.txt
+renpy_project/errors.txt
+
+# Media scratch
+*.mp4
+output*.mp4
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS / editor
+Thumbs.db
+.DS_Store

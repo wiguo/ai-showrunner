@@ -1,0 +1,17 @@
+.git
+.env
+build
+jobs
+renpy_project/game/movies
+renpy_project/game/voice
+renpy_project/game/cache
+renpy_project/game/saves
+__pycache__
+*.pyc
+*.mp4
+.venv
+venv
+docs
+ENTROPY_story.txt
+ENTROPY_transcript.txt
+video_game_scripts.txt
