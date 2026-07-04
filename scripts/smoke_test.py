@@ -25,6 +25,11 @@ import zlib
 
 import requests
 
+# Windows consoles default to a legacy codepage; API errors often contain
+# full-width punctuation that would crash print().
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
 BASE = "https://dashscope-intl.aliyuncs.com/api/v1"
 CHAT_BASE = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
@@ -276,9 +281,10 @@ def main():
         print(f"\n=== {name} ===")
         PROBES[name]()
     print("\n=== SUMMARY ===")
-    for tag, (ok, detail) in RESULTS.items():
+    for tag, val in RESULTS.items():
         if tag.startswith("_"):
             continue
+        ok, _detail = val
         print(f"  {'PASS' if ok else 'FAIL'}  {tag}")
     print("\nUse the first PASS in each class to set pipeline/config.py "
           "(LLM_MODEL, T2I chain, EDIT model, I2V chain, TTS model/style/voices).")

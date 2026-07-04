@@ -51,7 +51,9 @@ LLM_FALLBACKS = _chain("LLM_FALLBACKS", ["qwen3-max", "qwen-plus"])
 
 # First frames. "async" entries use the text2image task endpoint,
 # "sync" entries the multimodal endpoint (z-image-turbo shape).
-T2I_CHAIN = _chain("T2I_CHAIN", ["wan2.6-t2i", "z-image-turbo"])
+# Smoke-tested 2026-07-04: wan2.2-t2i-flash + z-image-turbo PASS;
+# wan2.6-t2i / qwen-image-2.0-pro are not served at this endpoint ("url error").
+T2I_CHAIN = _chain("T2I_CHAIN", ["wan2.2-t2i-flash", "z-image-turbo"])
 T2I_SYNC_MODELS = {"z-image-turbo"}          # models needing the sync shape
 
 # Last-frame image editing. happyhorse i2v is first-frame-only, so last
@@ -66,10 +68,11 @@ I2V_CHAIN = _chain("I2V_CHAIN", ["happyhorse-1.1-i2v", "wan2.6-i2v-flash",
 I2V_FIRSTLAST_MODEL = os.getenv("I2V_FIRSTLAST_MODEL", "")  # e.g. wan2.7-i2v if available
 
 # Voice synthesis. TTS_API_STYLE: "sync" = multimodal endpoint (qwen3-tts
-# shape), "async" = text2audio task endpoint (cosyvoice shape). The client
-# falls back across TTS_CHAIN entries: (model, style) pairs.
-TTS_MODEL = os.getenv("TTS_MODEL", "cosyvoice-v3-plus")
-TTS_API_STYLE = os.getenv("TTS_API_STYLE", "async")
+# shape), "async" = text2audio task endpoint (cosyvoice shape).
+# Smoke-tested 2026-07-04: qwen3-tts-flash PASS; cosyvoice-v3-plus is not
+# reachable over these REST endpoints (it uses a WebSocket API on intl).
+TTS_MODEL = os.getenv("TTS_MODEL", "qwen3-tts-flash")
+TTS_API_STYLE = os.getenv("TTS_API_STYLE", "sync")
 TTS_FALLBACK_MODEL = os.getenv("TTS_FALLBACK_MODEL", "qwen3-tts-flash")
 TTS_FALLBACK_STYLE = "sync"
 TTS_LANGUAGE = "Auto"

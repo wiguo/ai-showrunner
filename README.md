@@ -18,13 +18,13 @@ For any story premise (a single sentence is enough):
 - a **branching scene graph** — real choices that fork into different scene
   chains and rejoin, validated for reachability, with durations fitted to a
   runtime budget
-- a **keyframe** per scene (`wan2.6-t2i`), style- and character-consistent via
-  embedded appearance prompts + stable seeds
+- a **keyframe** per scene (`wan2.2-t2i-flash`), style- and character-consistent
+  via embedded appearance prompts + stable seeds
 - a **video clip** per scene (`happyhorse-1.1-i2v`), with automatic fallback
   across models when a quota runs dry
 - the protagonist's **first-person inner monologue**, TTS-voiced
-  (`cosyvoice-v3-plus`) in a voice auto-matched to the character, mixed into
-  each clip with **synced burned-in subtitles**
+  (`qwen3-tts-flash`) in a voice auto-matched to the character's gender, mixed
+  into each clip with **synced burned-in subtitles**
 - a **narrator voice** for the cinematic title intro
 - a lint-checked **Ren'Py project**, zipped with play instructions
 
@@ -56,10 +56,10 @@ Pipeline stages (each resumable — completed artifacts are skipped):
 | 1. Screenplay | `pipeline/step1_expand.py` | `qwen3.7-max` |
 | 2. Scene graph + branching | `pipeline/step2_scenes.py` | `qwen3.7-max` (JSON mode) |
 | 3. Opening narration | `pipeline/step_intro.py` | `qwen3.7-max` |
-| 4. Keyframes | `pipeline/step3_frames.py` | `wan2.6-t2i` → `z-image-turbo` |
+| 4. Keyframes | `pipeline/step3_frames.py` | `wan2.2-t2i-flash` → `z-image-turbo` |
 | 5. Video clips | `pipeline/step4_clips.py` | `happyhorse-1.1-i2v` → `wan2.6-i2v-flash` → `wan2.2-i2v-flash` |
-| 6. Character monologue + SRT | `pipeline/step_monologue.py` | `qwen3.7-max` + `cosyvoice-v3-plus` |
-| 7. Narrator voice | `pipeline/step6_voice.py` | `cosyvoice-v3-plus` → `qwen3-tts-flash` |
+| 6. Character monologue + SRT | `pipeline/step_monologue.py` | `qwen3.7-max` + `qwen3-tts-flash` |
+| 7. Narrator voice | `pipeline/step6_voice.py` | `qwen3-tts-flash` |
 | 8. Ren'Py assembly + lint | `pipeline/step5_renpy.py` | deterministic templates (no LLM) |
 
 Chains (`→`) are automatic fallbacks: when a model is missing from the account
