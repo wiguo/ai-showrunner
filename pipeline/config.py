@@ -92,13 +92,17 @@ SECONDS_PER_SCENE = 11        # used to derive target scene count
 TARGET_MAIN_SCENES = round(TARGET_SECONDS / SECONDS_PER_SCENE)  # ~14
 MAX_SCENES = 16               # main-path + a few branch alternatives
 
-# Web-mode hard caps (server clamps user requests to these)
-WEB_MAX_TARGET_SECONDS = int(os.getenv("WEB_MAX_TARGET_SECONDS", "150"))
-WEB_MAX_SCENES = int(os.getenv("WEB_MAX_SCENES", "12"))
+# Web-mode hard caps (server clamps user requests to these).
+# At $0.14/s of video, a 150s job costs ~$21 — capped at 90s (~$13 worst
+# case, typically ~$9) to keep public/judge runs affordable.
+WEB_MAX_TARGET_SECONDS = int(os.getenv("WEB_MAX_TARGET_SECONDS", "90"))
+WEB_MAX_SCENES = int(os.getenv("WEB_MAX_SCENES", "10"))
 
 # Rough per-unit prices (USD) for the preview cost estimate shown to the user.
+# PRICE_PER_VIDEO_SECOND verified from actual billing (happyhorse-1.1-i2v
+# 720P, 2026-07): $0.14/s — video dominates every job's cost.
 PRICE_PER_IMAGE = 0.03
-PRICE_PER_VIDEO_SECOND = 0.08
+PRICE_PER_VIDEO_SECOND = 0.14
 PRICE_PER_TTS_CALL = 0.002
 
 
