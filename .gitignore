@@ -23,6 +23,9 @@ __pycache__/
 .venv/
 venv/
 
+# Private planning documents (never publish)
+steamplan/
+
 # Local scratch / experiment leftovers (not part of the project)
 databricks_mcp.log
 concat_list.txt
