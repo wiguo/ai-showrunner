@@ -124,7 +124,7 @@ Three genres from the same pipeline, each generated from one sentence:
 |---|---|---|---|
 | *Static Tomorrow* | Supernatural thriller | 9 scenes, 2 branch points | [Vimeo](https://vimeo.com/1206950343) |
 | *Same Pay, Different Pain* | Workplace comedy | 13 scenes, branching career paths | [Vimeo](https://vimeo.com/1206950581) |
-| *First Words* | Family vignette | 6 scenes, 1 branch point | demo video |
+| *First Words* | Family vignette | 6 scenes, 1 branch point | [Vimeo (demo video)](https://vimeo.com/1206942432) |
 
 | | |
 |---|---|
@@ -216,6 +216,18 @@ deploy/            single-command server bootstrap
 docs/              architecture diagram (source + render), screenshots, submission notes
 examples/          sample story premise
 ```
+
+## Feedback and contributions
+
+This project aims to contribute a smarter way to create Ren'Py projects —
+treating a visual novel as something a pipeline can compile from a story
+premise, rather than something assembled by hand. Feedback and suggestions
+are very welcome: if you have ideas on narrative structure generation, model
+choices, packaging, or the Ren'Py assembly itself, please open an
+[issue](https://github.com/wiguo/ai-showrunner/issues) or a pull request.
+Particularly interesting directions: multi-character dialogue with
+per-character voices, scene-to-scene visual continuity via last-frame
+chaining, longer formats, and background music.
 
 ## License
 
