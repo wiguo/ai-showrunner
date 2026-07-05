@@ -26,6 +26,12 @@ venv/
 # Private planning documents (never publish)
 steamplan/
 
+# Collected game builds + rendered movies (large local binaries)
+games/
+
+# Stray local screenshot (not referenced by the README)
+docs/static tomorrow .png
+
 # Local scratch / experiment leftovers (not part of the project)
 databricks_mcp.log
 concat_list.txt
